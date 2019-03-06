@@ -1,6 +1,5 @@
-## This is greatly inspired from the implementation of Mathieu Dumoulin
-## https://github.com/dumoulma/fic-prototype
-
+# This is greatly inspired from the implementation of Mathieu Dumoulin
+# https://github.com/dumoulma/fic-prototype
 from scipy.stats import norm
 from sklearn.base import BaseEstimator, TransformerMixin
 import scipy.sparse as sp
@@ -13,7 +12,6 @@ class EBNSTransformer(BaseEstimator, TransformerMixin):
         self.ppf_limit = ppf_limit
         self.bns_scores = []
         self.scoring_function = lambda x: np.max(x, axis=0)
-        self.bns_score_nb_positives = []
 
     def fit(self, X, y):
         y = np.array(y)
@@ -24,10 +22,8 @@ class EBNSTransformer(BaseEstimator, TransformerMixin):
         classes = np.array(list(set(y)))
         self.bns_scores = np.zeros((len(classes), X.shape[1]))
         for index, target_class in enumerate(classes):
-            class_mask = np.array(y == target_class, dtype=int)
-            self.bns_scores[index, :] = self._generate_bns_score(X, class_mask)
-        self.bns_score_nb_positives = np.sum(self.bns_scores > 0, axis=0)
-        self.bns_scores = np.abs(self.scoring_function(self.bns_scores))
+            positive_class_mask = np.array(y == target_class, dtype=int)
+            self.bns_scores[index, :] = self._generate_bns_score(X, positive_class_mask)
 
         return self
 
@@ -42,20 +38,27 @@ class EBNSTransformer(BaseEstimator, TransformerMixin):
         return sp.coo_matrix(X, dtype=np.float64)
 
     def _generate_bns_score(self, X, class_mask):
-        positive_doc = np.sum(class_mask)
-        negative_doc = len(class_mask) - positive_doc
+        number_positive_docs = np.sum(class_mask)
+        number_negative_docs = len(class_mask) - number_positive_docs
         bns_scores = np.ravel(np.zeros((1, X.shape[1])))
         for index, word in enumerate(X.T[:]):
             word_vector = np.ravel(word.toarray())
-            bns_scores[index] = self._compute_partial_bns(word_vector, positive_doc, negative_doc, class_mask)
+            bns_scores[index] = self._compute_partial_bns(word_vector, number_positive_docs, number_negative_docs, class_mask)
 
         return bns_scores
 
-    def _compute_partial_bns(self, word_vector, pos, neg, class_mask):
-        tp = np.sum(word_vector * class_mask)
-        fp = np.sum(word_vector * np.abs(class_mask - 1))
-        tpr = min(self.ppf_limit[1], max(self.ppf_limit[0], float(tp) / pos))
-        fpr = min(self.ppf_limit[1], max(self.ppf_limit[0], float(fp) / neg))
-        bns_score = norm.ppf(tpr) - norm.ppf(fpr)
+    def _compute_partial_bns(self, word_vector, number_positive_docs, number_negative_docs, class_mask):
+        number_true_positive = np.sum(word_vector * class_mask)
+        number_false_positive = np.sum(word_vector * np.abs(class_mask - 1))
+        true_positive_rate = self.bound_value(float(number_true_positive) / number_positive_docs, self.ppf_limit[0], self.ppf_limit[1])
+        false_positive_rate = self.bound_value(float(number_false_positive) / number_negative_docs, self.ppf_limit[0], self.ppf_limit[1])
+        bns_score = norm.ppf(true_positive_rate) - norm.ppf(false_positive_rate)
 
         return bns_score
+
+    @staticmethod
+    def bound_value(value, minimum, maximum):
+        upper_bounded_value = min(maximum, value)
+        upper_and_lower_bounded_value = max(upper_bounded_value, minimum)
+
+        return upper_and_lower_bounded_value
