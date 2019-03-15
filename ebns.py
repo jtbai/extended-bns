@@ -10,7 +10,7 @@ class EBNSTransformer(BaseEstimator, TransformerMixin):
 
     def __init__(self, ppf_limit=(0.0005, 1 - 0.0005)):
         self.ppf_limit = ppf_limit
-        self.bns_scores = []
+        self.ebns_scores = []
         self.scoring_function = lambda x: np.max(x, axis=0)
 
     def fit(self, X, y):
@@ -20,10 +20,13 @@ class EBNSTransformer(BaseEstimator, TransformerMixin):
         else:
             X = sp.csr_matrix(X, dtype=np.float64, copy=True)
         classes = np.array(list(set(y)))
-        self.bns_scores = np.zeros((len(classes), X.shape[1]))
+
+        bns_subscores = np.zeros((len(classes), X.shape[1]))
         for index, target_class in enumerate(classes):
             positive_class_mask = np.array(y == target_class, dtype=int)
-            self.bns_scores[index, :] = self._generate_bns_score(X, positive_class_mask)
+            bns_subscores[index, :] = self._generate_bns_subscore(X, positive_class_mask)
+
+        self.ebns_scores = np.max(bns_subscores, axis=0)
 
         return self
 
@@ -33,11 +36,11 @@ class EBNSTransformer(BaseEstimator, TransformerMixin):
         else:
             X = sp.csr_matrix(X, dtype=np.float64, copy=True)
         for it, index in enumerate(list(set(X.indices))):
-            X.T[index] *= self.bns_scores[index]
+            X.T[index] *= self.ebns_scores[index]
 
         return sp.coo_matrix(X, dtype=np.float64)
 
-    def _generate_bns_score(self, X, class_mask):
+    def _generate_bns_subscore(self, X, class_mask):
         number_positive_docs = np.sum(class_mask)
         number_negative_docs = len(class_mask) - number_positive_docs
         bns_scores = np.ravel(np.zeros((1, X.shape[1])))
